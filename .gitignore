@@ -1,0 +1,6 @@
+.env
+*.csv
+*.png
+__pycache__/
+browser_data/
+logs/

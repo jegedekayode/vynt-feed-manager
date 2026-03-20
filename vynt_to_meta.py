@@ -23,7 +23,7 @@ load_dotenv()
 # Config
 # ---------------------------------------------------------------------------
 VYNT_API_URL = "https://realapp.vyntapp.com/engine/api/v2/misc/seek"
-VYNT_BEARER_TOKEN = os.getenv("VYNT_BEARER_TOKEN", "")
+VYNT_BEARER_TOKEN = os.getenv("VYNT_AUTH_TOKEN", os.getenv("VYNT_BEARER_TOKEN", ""))
 FACEBOOK_ACCESS_TOKEN = os.getenv("FACEBOOK_ACCESS_TOKEN", "")
 CATALOG_ID = os.getenv("CATALOG_ID", "")
 BASE_PRODUCT_URL = os.getenv("BASE_PRODUCT_URL", "https://vynt.com/products/")
@@ -54,7 +54,8 @@ log = logging.getLogger("vynt_to_meta")
 
 def fetch_all_products() -> list[dict]:
     """Page through the Vynt seek API and return all raw product dicts."""
-    headers = {"Authorization": f"Bearer {VYNT_BEARER_TOKEN}"}
+    token = VYNT_BEARER_TOKEN.removeprefix("bearer ").removeprefix("Bearer ")
+    headers = {"Authorization": f"Bearer {token}"}
     all_products: list[dict] = []
     page = 0
 

@@ -8,12 +8,14 @@ import os
 import json
 import logging
 import threading
+import base64
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, BackgroundTasks
+from fastapi.responses import HTMLResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -32,6 +34,7 @@ FB_BATCH_SIZE = 50
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
 LAST_SYNC_FILE = LOGS_DIR / "last_sync.json"
+SYNC_HISTORY_FILE = Path("sync_history.json")
 
 WAT = timezone(timedelta(hours=1))  # West Africa Time = UTC+1
 
@@ -182,6 +185,46 @@ _sync_lock = threading.Lock()
 _last_sync: dict = {}
 
 
+def _save_sync_history(entry: dict):
+    """Append a sync result to sync_history.json, keeping only the last 10."""
+    history = []
+    if SYNC_HISTORY_FILE.exists():
+        try:
+            history = json.loads(SYNC_HISTORY_FILE.read_text())
+        except Exception:
+            pass
+    history.append(entry)
+    history = history[-10:]
+    SYNC_HISTORY_FILE.write_text(json.dumps(history, indent=2))
+
+
+def _get_token_health() -> dict:
+    """Decode JWT expiry from VYNT_AUTH_TOKEN and return days remaining."""
+    token = VYNT_BEARER_TOKEN.removeprefix("bearer ").removeprefix("Bearer ").strip()
+    if not token:
+        return {"status": "missing", "message": "No token configured"}
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {"status": "unknown", "message": "Not a JWT token"}
+        payload = parts[1]
+        # Fix base64 padding
+        payload += "=" * (4 - len(payload) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload))
+        exp = decoded.get("exp")
+        if not exp:
+            return {"status": "unknown", "message": "No exp claim in token"}
+        expiry_dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+        days_remaining = (expiry_dt - datetime.now(timezone.utc)).days
+        return {
+            "status": "warning" if days_remaining < 30 else "ok",
+            "expires": expiry_dt.isoformat(),
+            "days_remaining": days_remaining,
+        }
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def run_sync():
     """Execute a full fetch → transform → upload cycle."""
     global _last_sync
@@ -219,6 +262,7 @@ def run_sync():
         }
     finally:
         LAST_SYNC_FILE.write_text(json.dumps(_last_sync, indent=2))
+        _save_sync_history(_last_sync)
         log.info("===== Sync finished — %s =====", _last_sync.get("status"))
         _sync_lock.release()
 
@@ -267,3 +311,24 @@ def status():
 def trigger_sync(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_sync)
     return {"message": "Sync triggered in background"}
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    html_path = Path(__file__).parent / "dashboard.html"
+    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/sync-history")
+def sync_history():
+    if SYNC_HISTORY_FILE.exists():
+        try:
+            return json.loads(SYNC_HISTORY_FILE.read_text())
+        except Exception:
+            pass
+    return []
+
+
+@app.get("/token-health")
+def token_health():
+    return _get_token_health()

@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vynt Feed Manager</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f14;color:#e0e0e6;min-height:100vh}
+  .header{background:linear-gradient(135deg,#6B21A8,#4c1d95);padding:20px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  .logo{display:flex;align-items:center;gap:12px}
+  .logo svg{width:36px;height:36px}
+  .logo h1{font-size:1.4rem;font-weight:700;color:#fff}
+  .logo span{font-size:.8rem;color:#c4b5fd;font-weight:400}
+  .container{max-width:1100px;margin:0 auto;padding:20px 16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:20px}
+  .card{background:#1a1a24;border:1px solid #2a2a3a;border-radius:12px;padding:20px}
+  .card h3{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:#8888a0;margin-bottom:8px}
+  .card .value{font-size:1.8rem;font-weight:700}
+  .badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:600}
+  .badge.ok{background:#065f46;color:#6ee7b7}
+  .badge.partial{background:#78350f;color:#fcd34d}
+  .badge.error{background:#7f1d1d;color:#fca5a5}
+  .badge.warning{background:#78350f;color:#fcd34d}
+  .badge.missing{background:#7f1d1d;color:#fca5a5}
+  .badge.unknown{background:#374151;color:#9ca3af}
+  .btn{background:#6B21A8;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s;display:inline-flex;align-items:center;gap:8px}
+  .btn:hover{background:#7c3aed}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .spinner{width:16px;height:16px;border:2px solid #fff4;border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:none}
+  .btn.loading .spinner{display:block}
+  .btn.loading .btn-text{display:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  table{width:100%;border-collapse:collapse;font-size:.85rem}
+  th{text-align:left;padding:10px 12px;color:#8888a0;font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #2a2a3a}
+  td{padding:10px 12px;border-bottom:1px solid #1f1f2e}
+  tr:hover td{background:#1f1f2e}
+  .chart-wrap{height:220px;position:relative}
+  .error-log{background:#1a1a24;border:1px solid #2a2a3a;border-radius:12px;padding:20px;margin-bottom:20px}
+  .error-log h3{font-size:.85rem;color:#fca5a5;margin-bottom:10px}
+  .error-item{font-size:.8rem;color:#f87171;padding:6px 10px;background:#2a1515;border-radius:6px;margin-bottom:6px;word-break:break-all}
+  .section-title{font-size:1rem;font-weight:700;margin-bottom:12px;color:#c4b5fd}
+  .countdown{font-size:.85rem;color:#a78bfa}
+  .auto-refresh-note{font-size:.7rem;color:#555;text-align:center;margin-top:16px}
+  @media(max-width:600px){.grid{grid-template-columns:1fr}.header{padding:16px}.card .value{font-size:1.4rem}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <svg viewBox="0 0 36 36" fill="none"><rect width="36" height="36" rx="8" fill="#fff2"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="18" font-weight="700" font-family="sans-serif">V</text></svg>
+    <div><h1>Vynt Feed Manager</h1><span>Meta Catalog Sync Dashboard</span></div>
+  </div>
+  <button class="btn" id="syncBtn" onclick="triggerSync()">
+    <span class="btn-text">Sync Now</span>
+    <div class="spinner"></div>
+  </button>
+</div>
+
+<div class="container">
+
+  <!-- Status Cards -->
+  <div class="grid">
+    <div class="card">
+      <h3>Last Sync</h3>
+      <div class="value" id="lastSyncTime">—</div>
+    </div>
+    <div class="card">
+      <h3>Status</h3>
+      <div class="value" id="statusBadge">—</div>
+    </div>
+    <div class="card">
+      <h3>Products Fetched</h3>
+      <div class="value" id="fetched">—</div>
+    </div>
+    <div class="card">
+      <h3>Products Sent</h3>
+      <div class="value" id="sent">—</div>
+    </div>
+    <div class="card">
+      <h3>Next Sync</h3>
+      <div class="value countdown" id="countdown">—</div>
+    </div>
+    <div class="card">
+      <h3>Vynt Token</h3>
+      <div class="value" id="tokenHealth">—</div>
+    </div>
+  </div>
+
+  <!-- Error Log -->
+  <div class="error-log" id="errorSection" style="display:none">
+    <h3>Errors from Last Sync</h3>
+    <div id="errorList"></div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card" style="margin-bottom:20px">
+    <div class="section-title">Sync History — Products</div>
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+
+  <!-- History Table -->
+  <div class="card">
+    <div class="section-title">Sync History</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Date</th><th>Fetched</th><th>Sent</th><th>Status</th><th>Duration</th></tr></thead>
+        <tbody id="historyBody"><tr><td colspan="5" style="color:#555">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="auto-refresh-note">Auto-refreshes every 60 seconds</div>
+</div>
+
+<script>
+const BASE = window.location.origin;
+let chart = null;
+
+function formatTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit', hour12:true});
+  if (isToday) return 'Today at ' + time;
+  const yesterday = new Date(now); yesterday.setDate(now.getDate()-1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday at ' + time;
+  return d.toLocaleDateString([], {month:'short', day:'numeric'}) + ' at ' + time;
+}
+
+function duration(start, end) {
+  if (!start || !end) return '—';
+  const ms = new Date(end) - new Date(start);
+  const s = Math.floor(ms/1000);
+  if (s < 60) return s + 's';
+  return Math.floor(s/60) + 'm ' + (s%60) + 's';
+}
+
+function updateCountdown() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(1,0,0,0); // 2am WAT = 1am UTC
+  if (next <= now) next.setDate(next.getDate()+1);
+  const diff = next - now;
+  const h = Math.floor(diff/3600000);
+  const m = Math.floor((diff%3600000)/60000);
+  document.getElementById('countdown').textContent = h + 'h ' + m + 'm';
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch(BASE + '/status');
+    const d = await r.json();
+    if (d.status === 'no sync has run yet') {
+      document.getElementById('lastSyncTime').textContent = 'Never';
+      document.getElementById('statusBadge').innerHTML = '<span class="badge unknown">No data</span>';
+      return;
+    }
+    document.getElementById('lastSyncTime').textContent = formatTime(d.finished || d.started);
+    const s = d.status || 'unknown';
+    document.getElementById('statusBadge').innerHTML = '<span class="badge '+s+'">'+s.toUpperCase()+'</span>';
+    document.getElementById('fetched').textContent = (d.products_fetched || 0).toLocaleString();
+    document.getElementById('sent').textContent = (d.products_sent || 0).toLocaleString();
+
+    const errSection = document.getElementById('errorSection');
+    const errList = document.getElementById('errorList');
+    if (d.errors && d.errors.length) {
+      errSection.style.display = 'block';
+      errList.innerHTML = d.errors.slice(0,5).map(e => '<div class="error-item">'+escHtml(e)+'</div>').join('');
+      if (d.errors.length > 5) errList.innerHTML += '<div style="color:#888;font-size:.75rem;margin-top:6px">+ '+(d.errors.length-5)+' more errors</div>';
+    } else {
+      errSection.style.display = 'none';
+    }
+  } catch(e) { console.error('Status fetch failed', e); }
+}
+
+async function loadHistory() {
+  try {
+    const r = await fetch(BASE + '/sync-history');
+    const data = await r.json();
+    const tbody = document.getElementById('historyBody');
+    if (!data.length) { tbody.innerHTML = '<tr><td colspan="5" style="color:#555">No sync history yet</td></tr>'; return; }
+    tbody.innerHTML = data.slice().reverse().map(h => {
+      const s = h.status || 'unknown';
+      return '<tr><td>'+formatTime(h.started)+'</td><td>'+(h.products_fetched||0).toLocaleString()+'</td><td>'+(h.products_sent||0).toLocaleString()+'</td><td><span class="badge '+s+'">'+s.toUpperCase()+'</span></td><td>'+duration(h.started,h.finished)+'</td></tr>';
+    }).join('');
+    renderChart(data);
+  } catch(e) { console.error('History fetch failed', e); }
+}
+
+async function loadTokenHealth() {
+  try {
+    const r = await fetch(BASE + '/token-health');
+    const d = await r.json();
+    const el = document.getElementById('tokenHealth');
+    if (d.status === 'ok') {
+      el.innerHTML = '<span class="badge ok">'+d.days_remaining+'d left</span>';
+    } else if (d.status === 'warning') {
+      el.innerHTML = '<span class="badge warning">'+d.days_remaining+'d left</span>';
+    } else {
+      el.innerHTML = '<span class="badge '+(d.status||'unknown')+'">'+(d.message||d.status)+'</span>';
+    }
+  } catch(e) { console.error('Token health fetch failed', e); }
+}
+
+function renderChart(data) {
+  const ctx = document.getElementById('chart').getContext('2d');
+  const labels = data.map(h => {
+    const d = new Date(h.started);
+    return d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
+  });
+  const fetched = data.map(h => h.products_fetched || 0);
+  const sent = data.map(h => h.products_sent || 0);
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {label:'Fetched', data:fetched, backgroundColor:'#7c3aed', borderRadius:4},
+        {label:'Sent', data:sent, backgroundColor:'#22c55e', borderRadius:4}
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#888',font:{size:12}}}},
+      scales:{
+        x:{ticks:{color:'#666',font:{size:10},maxRotation:45},grid:{color:'#1f1f2e'}},
+        y:{ticks:{color:'#666'},grid:{color:'#1f1f2e'}}
+      }
+    }
+  });
+}
+
+async function triggerSync() {
+  const btn = document.getElementById('syncBtn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  try {
+    await fetch(BASE + '/sync', {method:'POST'});
+    // Poll status every 15s for up to 3 minutes
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const r = await fetch(BASE + '/status');
+        const d = await r.json();
+        // Check if sync finished after we triggered it
+        if (d.finished && new Date(d.finished) > new Date(Date.now() - 5*60000)) {
+          clearInterval(poll);
+          btn.classList.remove('loading');
+          btn.disabled = false;
+          refreshAll();
+        }
+      } catch(e) {}
+      if (attempts >= 12) { // 3 minutes
+        clearInterval(poll);
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        refreshAll();
+      }
+    }, 15000);
+  } catch(e) {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+function escHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function refreshAll() {
+  loadStatus();
+  loadHistory();
+  loadTokenHealth();
+  updateCountdown();
+}
+
+// Initial load
+refreshAll();
+// Auto-refresh every 60s
+setInterval(refreshAll, 60000);
+// Update countdown every 30s
+setInterval(updateCountdown, 30000);
+</script>
+</body>
+</html>

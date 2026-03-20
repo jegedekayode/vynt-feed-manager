@@ -166,6 +166,10 @@ def upload_to_facebook(items: list[dict]) -> dict:
                 msg = f"Batch {i}: HTTP {resp.status_code} — {resp.text[:300]}"
                 errors.append(msg)
                 log.error("  → %s", msg)
+                # Abort on auth errors — no point retrying with a bad token
+                if resp.status_code in (401, 403):
+                    log.error("Auth failure — aborting remaining batches.")
+                    break
 
     return {"sent": total_sent, "errors": errors}
 

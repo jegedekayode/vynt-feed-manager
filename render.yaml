@@ -5,10 +5,12 @@ services:
     name: vynt-feed-manager
     runtime: python
     region: frankfurt # closest Render region to Lagos
-    # The in-process scheduler fires the daily 02:00 WAT sync, so the service
-    # must stay up. Free-tier instances spin down when idle and would miss it.
-    plan: starter
-    numInstances: 1 # exactly one scheduler — do not scale out
+    # Free tier: the instance spins down when idle, so the daily sync is
+    # driven by an external cron (cron-job.org) that pings /health to wake it
+    # and then POSTs /sync — see README. If you upgrade to `starter` (always
+    # on), the in-process scheduler handles 02:00 WAT by itself and no
+    # external cron is needed. Either way keep it at 1 instance / 1 worker.
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn vynt_to_meta:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health

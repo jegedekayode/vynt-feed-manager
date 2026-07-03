@@ -74,10 +74,13 @@ The repo contains a [render.yaml](render.yaml) Blueprint.
 
 Notes:
 
-- The service uses the **starter** plan because the scheduler runs in-process —
-  a free instance spins down when idle and would sleep through the 02:00 WAT
-  sync. (Alternative: switch to the free plan and have an external cron, e.g.
-  [cron-job.org](https://cron-job.org), `POST` to `/sync` at 01:00 UTC daily.)
+- The blueprint uses the **free** plan. Free instances spin down when idle and
+  would sleep through the 02:00 WAT sync, so an external cron (e.g.
+  [cron-job.org](https://cron-job.org)) must drive it: a `GET /health` at
+  01:55 WAT to wake the instance, then a `POST /sync` at 02:05 WAT. (If both
+  the internal scheduler and the cron fire, the sync lock and upsert semantics
+  make the duplicate harmless.) Alternative: switch `plan:` to `starter`
+  (always-on) and the in-process scheduler needs no external help.
 - Keep it at **1 instance / 1 worker** or the sync would be scheduled multiple
   times in parallel.
 - The filesystem is ephemeral: sync history resets on each deploy/restart

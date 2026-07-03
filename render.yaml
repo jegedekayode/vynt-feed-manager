@@ -1,0 +1,43 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: Render Dashboard → New → Blueprint → select this repo.
+services:
+  - type: web
+    name: vynt-feed-manager
+    runtime: python
+    region: frankfurt # closest Render region to Lagos
+    # The in-process scheduler fires the daily 02:00 WAT sync, so the service
+    # must stay up. Free-tier instances spin down when idle and would miss it.
+    plan: starter
+    numInstances: 1 # exactly one scheduler — do not scale out
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn vynt_to_meta:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: VYNT_AUTH_TOKEN
+        sync: false # prompted for in the Render dashboard; never committed
+      - key: FACEBOOK_ACCESS_TOKEN
+        sync: false
+      - key: CATALOG_ID
+        sync: false
+      # TikTok is optional — leave these blank to sync Facebook only.
+      # (TikTok ingests the feed this service exposes at /feed.csv, using the
+      # public URL Render provides via RENDER_EXTERNAL_URL.)
+      - key: TIKTOK_ACCESS_TOKEN
+        sync: false
+      - key: TIKTOK_BC_ID
+        sync: false
+      - key: TIKTOK_CATALOG_ID
+        sync: false
+      - key: BASE_PRODUCT_URL
+        value: https://vynt.com/products/
+    # Optional: keep sync history across deploys/restarts by attaching a disk
+    # and pointing DATA_DIR at it (uncomment both blocks):
+    # disk:
+    #   name: vynt-data
+    #   mountPath: /data
+    #   sizeGB: 1
+    # (then add)  - key: DATA_DIR
+    #             value: /data

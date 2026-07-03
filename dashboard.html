@@ -24,6 +24,7 @@
   .badge.error{background:#7f1d1d;color:#fca5a5}
   .badge.warning{background:#78350f;color:#fcd34d}
   .badge.missing{background:#7f1d1d;color:#fca5a5}
+  .badge.expired{background:#7f1d1d;color:#fca5a5}
   .badge.unknown{background:#374151;color:#9ca3af}
   .btn{background:#6B21A8;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s;display:inline-flex;align-items:center;gap:8px}
   .btn:hover{background:#7c3aed}
@@ -76,8 +77,12 @@
       <div class="value" id="fetched">—</div>
     </div>
     <div class="card">
-      <h3>Products Sent</h3>
+      <h3>Sent to Meta</h3>
       <div class="value" id="sent">—</div>
+    </div>
+    <div class="card">
+      <h3>Sent to TikTok</h3>
+      <div class="value" id="ttSent">—</div>
     </div>
     <div class="card">
       <h3>Next Sync</h3>
@@ -106,8 +111,8 @@
     <div class="section-title">Sync History</div>
     <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>Date</th><th>Fetched</th><th>Sent</th><th>Status</th><th>Duration</th></tr></thead>
-        <tbody id="historyBody"><tr><td colspan="5" style="color:#555">Loading…</td></tr></tbody>
+        <thead><tr><th>Date</th><th>Fetched</th><th>Meta</th><th>TikTok</th><th>Status</th><th>Duration</th></tr></thead>
+        <tbody id="historyBody"><tr><td colspan="6" style="color:#555">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -118,6 +123,10 @@
 <script>
 const BASE = window.location.origin;
 let chart = null;
+
+// Per-platform sent counts; legacy history entries only have products_sent (Meta-only era)
+function metaSent(d) { return d.facebook ? (d.facebook.sent || 0) : (d.products_sent || 0); }
+function tiktokSent(d) { return (d.tiktok && !d.tiktok.skipped) ? (d.tiktok.sent || 0) : null; }
 
 function formatTime(iso) {
   if (!iso) return '—';
@@ -143,7 +152,7 @@ function updateCountdown() {
   const now = new Date();
   const next = new Date(now);
   next.setUTCHours(1,0,0,0); // 2am WAT = 1am UTC
-  if (next <= now) next.setDate(next.getDate()+1);
+  if (next <= now) next.setTime(next.getTime() + 86400000); // add a UTC day (local setDate() drifts across DST)
   const diff = next - now;
   const h = Math.floor(diff/3600000);
   const m = Math.floor((diff%3600000)/60000);
@@ -163,7 +172,9 @@ async function loadStatus() {
     const s = d.status || 'unknown';
     document.getElementById('statusBadge').innerHTML = '<span class="badge '+s+'">'+s.toUpperCase()+'</span>';
     document.getElementById('fetched').textContent = (d.products_fetched || 0).toLocaleString();
-    document.getElementById('sent').textContent = (d.products_sent || 0).toLocaleString();
+    document.getElementById('sent').textContent = metaSent(d).toLocaleString();
+    const tt = tiktokSent(d);
+    document.getElementById('ttSent').textContent = tt === null ? 'Off' : tt.toLocaleString();
 
     const errSection = document.getElementById('errorSection');
     const errList = document.getElementById('errorList');
@@ -182,10 +193,11 @@ async function loadHistory() {
     const r = await fetch(BASE + '/sync-history');
     const data = await r.json();
     const tbody = document.getElementById('historyBody');
-    if (!data.length) { tbody.innerHTML = '<tr><td colspan="5" style="color:#555">No sync history yet</td></tr>'; return; }
+    if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" style="color:#555">No sync history yet</td></tr>'; return; }
     tbody.innerHTML = data.slice().reverse().map(h => {
       const s = h.status || 'unknown';
-      return '<tr><td>'+formatTime(h.started)+'</td><td>'+(h.products_fetched||0).toLocaleString()+'</td><td>'+(h.products_sent||0).toLocaleString()+'</td><td><span class="badge '+s+'">'+s.toUpperCase()+'</span></td><td>'+duration(h.started,h.finished)+'</td></tr>';
+      const tt = tiktokSent(h);
+      return '<tr><td>'+formatTime(h.started)+'</td><td>'+(h.products_fetched||0).toLocaleString()+'</td><td>'+metaSent(h).toLocaleString()+'</td><td>'+(tt === null ? '—' : tt.toLocaleString())+'</td><td><span class="badge '+s+'">'+s.toUpperCase()+'</span></td><td>'+duration(h.started,h.finished)+'</td></tr>';
     }).join('');
     renderChart(data);
   } catch(e) { console.error('History fetch failed', e); }
@@ -213,7 +225,8 @@ function renderChart(data) {
     return d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
   });
   const fetched = data.map(h => h.products_fetched || 0);
-  const sent = data.map(h => h.products_sent || 0);
+  const meta = data.map(h => metaSent(h));
+  const tiktok = data.map(h => tiktokSent(h) || 0);
   if (chart) chart.destroy();
   chart = new Chart(ctx, {
     type: 'bar',
@@ -221,7 +234,8 @@ function renderChart(data) {
       labels,
       datasets: [
         {label:'Fetched', data:fetched, backgroundColor:'#7c3aed', borderRadius:4},
-        {label:'Sent', data:sent, backgroundColor:'#22c55e', borderRadius:4}
+        {label:'Meta', data:meta, backgroundColor:'#22c55e', borderRadius:4},
+        {label:'TikTok', data:tiktok, backgroundColor:'#06b6d4', borderRadius:4}
       ]
     },
     options: {
@@ -239,6 +253,7 @@ async function triggerSync() {
   const btn = document.getElementById('syncBtn');
   btn.classList.add('loading');
   btn.disabled = true;
+  const triggeredAt = Date.now();
   try {
     await fetch(BASE + '/sync', {method:'POST'});
     // Poll status every 15s for up to 3 minutes
@@ -248,8 +263,9 @@ async function triggerSync() {
       try {
         const r = await fetch(BASE + '/status');
         const d = await r.json();
-        // Check if sync finished after we triggered it
-        if (d.finished && new Date(d.finished) > new Date(Date.now() - 5*60000)) {
+        // Only count a sync that finished after this trigger (1 min clock-skew allowance),
+        // otherwise a recently finished previous sync ends the spinner early
+        if (d.finished && new Date(d.finished).getTime() >= triggeredAt - 60000) {
           clearInterval(poll);
           btn.classList.remove('loading');
           btn.disabled = false;

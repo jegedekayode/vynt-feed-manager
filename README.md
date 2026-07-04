@@ -36,7 +36,7 @@ and manual syncs.
 | `TIKTOK_BC_ID`          | for TikTok | TikTok Business Center id                      |
 | `TIKTOK_CATALOG_ID`     | for TikTok | TikTok catalog id                              |
 | `PUBLIC_BASE_URL`       | no       | Public URL of this service, needed by TikTok to fetch `/feed.csv` (on Render, `RENDER_EXTERNAL_URL` is used automatically) |
-| `BASE_PRODUCT_URL`      | no       | Product page base URL (default `https://vynt.com/products/`) |
+| `BASE_PRODUCT_URL`      | no       | Where ad clicks land. Either a prefix the product id is appended to, or a template with `{id}`, e.g. `https://apps.vyntapp.com/F8rp/3db4cmor?type=post&id={id}` |
 | `GRAPH_API_VERSION`     | no       | Default `v25.0`                                  |
 | `DATA_DIR`              | no       | Where logs/state are written (default `./logs`)  |
 

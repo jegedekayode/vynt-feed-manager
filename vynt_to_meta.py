@@ -37,8 +37,10 @@ VYNT_BEARER_TOKEN = os.getenv("VYNT_AUTH_TOKEN", os.getenv("VYNT_BEARER_TOKEN", 
 FACEBOOK_ACCESS_TOKEN = os.getenv("FACEBOOK_ACCESS_TOKEN", "")
 CATALOG_ID = os.getenv("CATALOG_ID", "")
 GRAPH_API_VERSION = os.getenv("GRAPH_API_VERSION", "v25.0")
+# Either a prefix the product id is appended to, or a template containing
+# {id} (e.g. "https://apps.vyntapp.com/F8rp/3db4cmor?type=post&id={id}").
 BASE_PRODUCT_URL = os.getenv("BASE_PRODUCT_URL", "https://vynt.com/products/").strip()
-if not BASE_PRODUCT_URL.endswith("/"):
+if "{id}" not in BASE_PRODUCT_URL and "?" not in BASE_PRODUCT_URL and not BASE_PRODUCT_URL.endswith("/"):
     BASE_PRODUCT_URL += "/"
 
 # TikTok Catalog API (optional destination). Products are delivered by pointing
@@ -85,6 +87,13 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("vynt_to_meta")
+
+
+def _product_link(product_id: str) -> str:
+    quoted = quote(product_id, safe="")
+    if "{id}" in BASE_PRODUCT_URL:
+        return BASE_PRODUCT_URL.replace("{id}", quoted)
+    return f"{BASE_PRODUCT_URL}{quoted}"
 
 
 def _extract_id(raw: dict) -> str:
@@ -235,7 +244,7 @@ def to_facebook_item(raw: dict) -> dict:
         "availability": availability,
         "condition": "new",
         "price": f"{price_val} {currency}",
-        "link": f"{BASE_PRODUCT_URL}{quote(product_id, safe='')}",
+        "link": _product_link(product_id),
         "image_link": image_url,
         "brand": "Vynt",
         "google_product_category": category,

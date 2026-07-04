@@ -23,7 +23,7 @@ from urllib.parse import quote
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, BackgroundTasks
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -607,6 +607,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Vynt → Meta Catalog Sync", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/dashboard")
 
 
 @app.get("/health")

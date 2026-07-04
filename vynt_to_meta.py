@@ -69,8 +69,8 @@ SYNC_HISTORY_FILE = DATA_DIR / "sync_history.json"
 SYNC_HISTORY_LIMIT = 10
 FEED_FILE = DATA_DIR / "feed.csv"
 FEED_COLUMNS = [
-    "id", "title", "description", "availability", "condition",
-    "price", "link", "image_link", "brand", "google_product_category",
+    "id", "title", "description", "availability", "condition", "price",
+    "link", "image_link", "additional_image_link", "brand", "google_product_category",
 ]
 
 WAT = timezone(timedelta(hours=1))  # West Africa Time = UTC+1
@@ -94,6 +94,15 @@ def _product_link(product_id: str) -> str:
     if "{id}" in BASE_PRODUCT_URL:
         return BASE_PRODUCT_URL.replace("{id}", quoted)
     return f"{BASE_PRODUCT_URL}{quoted}"
+
+
+def _is_sellable(raw: dict) -> bool:
+    """Only approved listings belong in ads. Vynt statuses seen in the wild:
+    "approved", "rejected", "pending approval". A missing status is tolerated
+    (schema drift shouldn't empty the catalog); "sold" stays in the catalog
+    and is marked out of stock by the availability mapping."""
+    status = str(raw.get("status") or "").strip().lower()
+    return status in ("", "approved", "sold")
 
 
 def _extract_id(raw: dict) -> str:
@@ -217,22 +226,36 @@ def to_facebook_item(raw: dict) -> dict:
     price_val = raw.get("price") or raw.get("amount") or 0
     currency = str(raw.get("currency") or "NGN").strip().upper()
 
-    # Images — accept string, list of strings, or list of dicts
-    images = raw.get("images") or raw.get("image") or []
-    image_url = ""
-    if isinstance(images, str):
-        image_url = images
-    elif isinstance(images, list) and images:
-        first = images[0]
-        if isinstance(first, str):
-            image_url = first
-        elif isinstance(first, dict):
-            image_url = str(first.get("url") or first.get("src") or "")
+    # Images — Vynt stores them as photos: [{"path": <cloudinary url>, ...}];
+    # keep string / list-of-strings / url|src-dict fallbacks for safety
+    photos = raw.get("photos") or raw.get("images") or raw.get("image") or []
+    if isinstance(photos, str):
+        photos = [photos]
+    image_urls: list[str] = []
+    if isinstance(photos, list):
+        for photo in photos:
+            if isinstance(photo, str) and photo:
+                image_urls.append(photo)
+            elif isinstance(photo, dict):
+                url = str(photo.get("path") or photo.get("url") or photo.get("src") or "")
+                if url:
+                    image_urls.append(url)
+    image_url = image_urls[0] if image_urls else ""
 
-    # Availability
-    sold = bool(raw.get("sold"))
+    # Condition — Vynt uses resale grades ("Brand new", "Like new",
+    # "Used - Good"); the catalogs only accept new / refurbished / used
+    cond = str(raw.get("condition") or "").strip().lower()
+    condition = "new" if cond in ("brand new", "new", "") else "used"
+
+    # Availability — no "sold" flag exists in the API; quantity 0 means gone
     status = str(raw.get("status") or "").strip().lower()
-    availability = "out of stock" if (sold or status == "sold") else "in stock"
+    quantity = raw.get("quantity")
+    out_of_stock = (
+        bool(raw.get("sold"))
+        or status == "sold"
+        or (isinstance(quantity, (int, float)) and quantity <= 0)
+    )
+    availability = "out of stock" if out_of_stock else "in stock"
 
     # Category
     category = str(raw.get("category") or raw.get("categoryName") or "").strip()
@@ -242,10 +265,11 @@ def to_facebook_item(raw: dict) -> dict:
         "title": title[:FB_TITLE_MAX],
         "description": description[:FB_DESCRIPTION_MAX],
         "availability": availability,
-        "condition": "new",
+        "condition": condition,
         "price": f"{price_val} {currency}",
         "link": _product_link(product_id),
         "image_link": image_url,
+        "additional_image_link": ",".join(image_urls[1:11]),
         "brand": "Vynt",
         "google_product_category": category,
     }
@@ -501,11 +525,16 @@ def run_sync():
         if not raw_products:
             raise RuntimeError("Vynt API returned 0 products — aborting sync (catalogs left untouched).")
 
-        transformed = [to_facebook_item(p) for p in raw_products if isinstance(p, dict)]
+        sellable = [p for p in raw_products if isinstance(p, dict) and _is_sellable(p)]
+        unapproved = len(raw_products) - len(sellable)
+        if unapproved:
+            log.info("Excluding %d listings not approved for sale (rejected / pending approval).", unapproved)
+
+        transformed = [to_facebook_item(p) for p in sellable]
         valid_items = [item for item in transformed if item.get("id")]
         skipped = len(raw_products) - len(valid_items)
-        if skipped:
-            log.warning("Skipping %d items without a usable product id.", skipped)
+        if len(sellable) - len(valid_items):
+            log.warning("Skipping %d items without a usable product id.", len(sellable) - len(valid_items))
         log.info("Transformed %d items.", len(valid_items))
 
         feed_error = None

@@ -33,8 +33,9 @@ services:
         sync: false
       - key: TIKTOK_CATALOG_ID
         sync: false
+      # Deep link opening the product in the Vynt app ({id} is replaced per product)
       - key: BASE_PRODUCT_URL
-        value: https://vynt.com/products/
+        value: https://apps.vyntapp.com/F8rp/3db4cmor?type=post&id={id}
     # Optional: keep sync history across deploys/restarts by attaching a disk
     # and pointing DATA_DIR at it (uncomment both blocks):
     # disk:

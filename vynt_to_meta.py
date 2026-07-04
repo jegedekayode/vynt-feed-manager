@@ -612,6 +612,26 @@ def run_sync():
         _sync_lock.release()
 
 
+def _rebuild_feed_if_missing():
+    """Regenerate feed.csv after a restart (the disk is ephemeral) so TikTok's
+    scheduled fetch never hits a 404. Fetch + transform only — no uploads."""
+    if FEED_FILE.exists() or not _clean_token(VYNT_BEARER_TOKEN):
+        return
+    if not _sync_lock.acquire(blocking=False):
+        return  # a sync is already running; it will write the feed
+    try:
+        log.info("feed.csv missing after restart — rebuilding …")
+        raw = fetch_all_products()
+        sellable = [p for p in raw if isinstance(p, dict) and _is_sellable(p)]
+        items = [i for i in (to_facebook_item(p) for p in sellable) if i.get("id")]
+        if items:
+            write_feed_csv(items)
+    except Exception:
+        log.exception("Feed rebuild failed")
+    finally:
+        _sync_lock.release()
+
+
 # ---------------------------------------------------------------------------
 # FastAPI app + scheduler
 # ---------------------------------------------------------------------------
@@ -640,6 +660,7 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
     log.info("Scheduler started — daily sync at 02:00 Africa/Lagos (WAT)")
+    threading.Thread(target=_rebuild_feed_if_missing, name="feed-rebuild", daemon=True).start()
     yield
     scheduler.shutdown(wait=False)
 
